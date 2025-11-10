@@ -1,0 +1,28 @@
+{
+  "name": "newpixwebtester",
+  "version": "1.0.0",
+  "description": "A full-stack testing platform for a TCP banking protocol.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "bcrypt": "^5.0.1",
+    "body-parser": "^1.20.2",
+    "express": "^4.18.2",
+    "jsonwebtoken": "^8.5.1",
+    "pg": "^8.12.0",
+    "sqlite3": "^5.1.7",
+    "ws": "^8.17.1"
+  },
+  "devDependencies": {
+    "@prisma/client": "^4.16.2",
+    "nodemon": "^2.0.22",
+    "prisma": "^4.16.2"
+  }
+}

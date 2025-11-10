@@ -1,0 +1,36 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  ra            String        @id @unique
+  password_hash String
+  TestHistory   TestHistory[]
+}
+
+model TestHistory {
+  id             Int              @id @default(autoincrement())
+  user_ra        String
+  test_type      String // "CLIENT" or "SERVER"
+  final_score    Float
+  created_at     DateTime         @default(now())
+  user           User             @relation(fields: [user_ra], references: [ra])
+  TestStepResult TestStepResult[]
+}
+
+model TestStepResult {
+  id         Int         @id @default(autoincrement())
+  history_id Int
+  step_name  String
+  status     String // "OK" or "FAIL"
+  details    String
+  history    TestHistory @relation(fields: [history_id], references: [id])
+}
