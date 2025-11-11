@@ -1,18 +1,18 @@
-const Rules = require('./rules');
+import Rules, { Rule, getEnum } from './rules';
 
-/**
- * Custom error for validation failures.
- */
-class ValidationError extends Error {
-  constructor(message) {
+export class ValidationError extends Error {
+  constructor(message: string) {
     super(message);
     this.name = 'ValidationError';
   }
 }
 
+// A generic type for our JSON objects
+type JsonNode = Record<string, any>;
+
 // --- KEY DEFINITIONS ---
 
-const EXPECTED_CLIENT_KEYS = {
+const EXPECTED_CLIENT_KEYS: Partial<Record<Rule, Set<string>>> = {
   [Rules.CONECTAR]: new Set(['operacao']),
   [Rules.USUARIO_LOGIN]: new Set(['operacao', 'cpf', 'senha']),
   [Rules.USUARIO_CRIAR]: new Set(['operacao', 'nome', 'cpf', 'senha']),
@@ -27,28 +27,19 @@ const EXPECTED_CLIENT_KEYS = {
 };
 
 const serverBaseKeys = new Set(['operacao', 'status', 'info']);
-const EXPECTED_SERVER_KEYS = {
+const EXPECTED_SERVER_KEYS: Partial<Record<Rule, Set<string>>> = {
   [Rules.USUARIO_LOGIN]: new Set(['operacao', 'status', 'info', 'token']),
   [Rules.USUARIO_LER]: new Set(['operacao', 'status', 'info', 'usuario']),
   [Rules.TRANSACAO_LER]: new Set(['operacao', 'status', 'info', 'transacoes']),
 };
 
-// Initialize all rules with at least an empty set for client and base keys for server
-for (const rule of Object.values(Rules)) {
-    if (typeof rule === 'string') {
-        if (!EXPECTED_CLIENT_KEYS[rule]) {
-            EXPECTED_CLIENT_KEYS[rule] = new Set();
-        }
-        if (!EXPECTED_SERVER_KEYS[rule]) {
-            EXPECTED_SERVER_KEYS[rule] = serverBaseKeys;
-        }
-    }
-}
+// Create a set of all valid rule values for quick lookup
+const validRuleValues = new Set(Object.values(Rules));
 
 
-// --- HELPER FUNCTIONS (equivalent to private methods in Java) ---
+// --- HELPER FUNCTIONS ---
 
-function _parseJson(jsonString) {
+function _parseJson(jsonString: string): JsonNode {
   if (jsonString == null || jsonString.trim() === '') {
     throw new ValidationError('A mensagem JSON não pode ser nula ou vazia.');
   }
@@ -59,14 +50,14 @@ function _parseJson(jsonString) {
   }
 }
 
-function _getRequiredField(parentNode, fieldName) {
+function _getRequiredField(parentNode: JsonNode, fieldName: string): any {
   if (Object.prototype.hasOwnProperty.call(parentNode, fieldName) && parentNode[fieldName] !== null) {
     return parentNode[fieldName];
   }
   throw new ValidationError(`O campo obrigatório '${fieldName}' não foi encontrado ou é nulo.`);
 }
 
-function _validateStringLength(parentNode, fieldName, minLength, maxLength) {
+function _validateStringLength(parentNode: JsonNode, fieldName: string, minLength: number, maxLength: number): void {
     const value = _getRequiredField(parentNode, fieldName);
     if (typeof value !== 'string') {
         throw new ValidationError(`O campo '${fieldName}' deve ser do tipo String.`);
@@ -80,7 +71,7 @@ function _validateStringLength(parentNode, fieldName, minLength, maxLength) {
     }
 }
 
-function _validateCpfFormat(parentNode, fieldName) {
+function _validateCpfFormat(parentNode: JsonNode, fieldName: string): void {
     const cpf = _getRequiredField(parentNode, fieldName);
     if (typeof cpf !== 'string') {
         throw new ValidationError(`O campo '${fieldName}' deve ser do tipo String.`);
@@ -91,7 +82,7 @@ function _validateCpfFormat(parentNode, fieldName) {
     }
 }
 
-function _validateDateFormat(parentNode, fieldName) {
+function _validateDateFormat(parentNode: JsonNode, fieldName: string): void {
     const date = _getRequiredField(parentNode, fieldName);
     if (typeof date !== 'string') {
         throw new ValidationError(`O campo '${fieldName}' deve ser do tipo String.`);
@@ -102,21 +93,21 @@ function _validateDateFormat(parentNode, fieldName) {
     }
 }
 
-function _getRequiredNumber(parentNode, fieldName) {
+function _getRequiredNumber(parentNode: JsonNode, fieldName: string): void {
     const value = _getRequiredField(parentNode, fieldName);
     if (typeof value !== 'number') {
         throw new ValidationError(`O campo '${fieldName}' deve ser do tipo numérico.`);
     }
 }
 
-function _getRequiredInt(parentNode, fieldName) {
+function _getRequiredInt(parentNode: JsonNode, fieldName: string): void {
     const value = _getRequiredField(parentNode, fieldName);
     if (!Number.isInteger(value)) {
         throw new ValidationError(`O campo '${fieldName}' deve ser do tipo int.`);
     }
 }
 
-function _getRequiredObject(parentNode, fieldName) {
+function _getRequiredObject(parentNode: JsonNode, fieldName: string): JsonNode {
     const value = _getRequiredField(parentNode, fieldName);
     if (typeof value !== 'object' || value === null || Array.isArray(value)) {
         throw new ValidationError(`O campo '${fieldName}' deve ser um objeto JSON (ex: { ... }).`);
@@ -124,7 +115,7 @@ function _getRequiredObject(parentNode, fieldName) {
     return value;
 }
 
-function _getRequiredArray(parentNode, fieldName) {
+function _getRequiredArray(parentNode: JsonNode, fieldName: string): any[] {
     const value = _getRequiredField(parentNode, fieldName);
     if (!Array.isArray(value)) {
         throw new ValidationError(`O campo '${fieldName}' deve ser um array JSON (ex: [ ... ]).`);
@@ -132,10 +123,16 @@ function _getRequiredArray(parentNode, fieldName) {
     return value;
 }
 
-function _checkExtraKeys(node, operacao, expectedKeysMap) {
+function _checkExtraKeys(node: JsonNode, operacao: Rule, expectedKeysMap: Partial<Record<Rule, Set<string>>>): void {
     const expected = expectedKeysMap[operacao];
     if (!expected) {
-        throw new ValidationError(`Definição de chaves esperadas não encontrada para a operação: ${operacao}`);
+        // This can happen for rules that don't have specific client keys, default to empty set
+        for (const key in node) {
+            if (key !== 'operacao') {
+                 throw new ValidationError(`Chave inesperada '${key}' encontrada para a operação '${operacao}'.`);
+            }
+        }
+        return;
     }
     for (const key in node) {
         if (Object.prototype.hasOwnProperty.call(node, key)) {
@@ -146,76 +143,31 @@ function _checkExtraKeys(node, operacao, expectedKeysMap) {
     }
 }
 
-
 // --- CLIENT -> SERVER VALIDATION LOGIC ---
 
-function _validateUsuarioLoginClient(node) {
-    _validateCpfFormat(node, 'cpf');
-    _validateStringLength(node, 'senha', 6, 120);
-}
-
-function _validateUsuarioLogoutClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-}
-
-function _validateUsuarioCriarClient(node) {
-    _validateStringLength(node, 'nome', 6, 120);
-    _validateCpfFormat(node, 'cpf');
-    _validateStringLength(node, 'senha', 6, 120);
-}
-
-function _validateUsuarioLerClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-}
-
-function _validateUsuarioAtualizarClient(node) {
+function _validateUsuarioLoginClient(node: JsonNode): void { _validateCpfFormat(node, 'cpf'); _validateStringLength(node, 'senha', 6, 120); }
+function _validateUsuarioLogoutClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); }
+function _validateUsuarioCriarClient(node: JsonNode): void { _validateStringLength(node, 'nome', 6, 120); _validateCpfFormat(node, 'cpf'); _validateStringLength(node, 'senha', 6, 120); }
+function _validateUsuarioLerClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); }
+function _validateUsuarioDeletarClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); }
+function _validateTransacaoCriarClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); _validateCpfFormat(node, 'cpf_destino'); _getRequiredNumber(node, 'valor'); }
+function _validateTransacaoLerClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); _validateDateFormat(node, 'data_inicial'); _validateDateFormat(node, 'data_final'); }
+function _validateDepositarClient(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); _getRequiredNumber(node, 'valor_enviado'); }
+function _validateErroServidorClient(node: JsonNode): void { _getRequiredField(node, 'operacao'); _getRequiredField(node, 'operacao_enviada'); _getRequiredField(node, 'info'); }
+function _validateUsuarioAtualizarClient(node: JsonNode): void {
     _validateStringLength(node, 'token', 3, 200);
     const usuarioNode = _getRequiredObject(node, 'usuario');
     if (!usuarioNode.hasOwnProperty('nome') && !usuarioNode.hasOwnProperty('senha')) {
         throw new ValidationError("O objeto 'usuario' para atualização deve conter pelo menos o campo 'nome' ou 'senha'.");
     }
-    if (usuarioNode.hasOwnProperty('nome')) {
-        _validateStringLength(usuarioNode, 'nome', 6, 120);
-    }
-    if (usuarioNode.hasOwnProperty('senha')) {
-        _validateStringLength(usuarioNode, 'senha', 6, 120);
-    }
-}
-
-function _validateUsuarioDeletarClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-}
-
-function _validateTransacaoCriarClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-    _validateCpfFormat(node, 'cpf_destino');
-    _getRequiredNumber(node, 'valor');
-}
-
-function _validateTransacaoLerClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-    _validateDateFormat(node, 'data_inicial');
-    _validateDateFormat(node, 'data_final');
-}
-
-function _validateDepositarClient(node) {
-    _validateStringLength(node, 'token', 3, 200);
-    _getRequiredNumber(node, 'valor_enviado');
-}
-
-function _validateErroServidorClient(node) {
-    _getRequiredField(node, 'operacao');
-    _getRequiredField(node, 'operacao_enviada');
-    _getRequiredField(node, 'info');
+    if (usuarioNode.hasOwnProperty('nome')) { _validateStringLength(usuarioNode, 'nome', 6, 120); }
+    if (usuarioNode.hasOwnProperty('senha')) { _validateStringLength(usuarioNode, 'senha', 6, 120); }
 }
 
 // --- SERVER -> CLIENT VALIDATION LOGIC ---
 
-function _validateUsuarioLoginServer(node) {
-    _validateStringLength(node, 'token', 3, 200);
-}
-
-function _validateUsuarioLerServer(node) {
+function _validateUsuarioLoginServer(node: JsonNode): void { _validateStringLength(node, 'token', 3, 200); }
+function _validateUsuarioLerServer(node: JsonNode): void {
     const usuarioNode = _getRequiredObject(node, 'usuario');
     _validateCpfFormat(usuarioNode, 'cpf');
     _validateStringLength(usuarioNode, 'nome', 6, 120);
@@ -224,92 +176,57 @@ function _validateUsuarioLerServer(node) {
         throw new ValidationError("A resposta do servidor para 'usuario_ler' não deve conter o campo 'senha'.");
     }
 }
-
-function _validateTransacaoLerServer(node) {
+function _validateTransacaoLerServer(node: JsonNode): void {
     const transacoesNode = _getRequiredArray(node, 'transacoes');
     for (const transacao of transacoesNode) {
         _getRequiredInt(transacao, 'id');
         _getRequiredNumber(transacao, 'valor_enviado');
-        
         const enviadorNode = _getRequiredObject(transacao, 'usuario_enviador');
         _validateStringLength(enviadorNode, 'nome', 6, 120);
         _validateCpfFormat(enviadorNode, 'cpf');
-        
         const recebedorNode = _getRequiredObject(transacao, 'usuario_recebedor');
         _validateStringLength(recebedorNode, 'nome', 6, 120);
         _validateCpfFormat(recebedorNode, 'cpf');
-
         _validateDateFormat(transacao, 'criado_em');
         _validateDateFormat(transacao, 'atualizado_em');
     }
 }
 
-
 // --- PUBLIC API ---
 
-/**
- * Validates a JSON message sent from the Client to the Server.
- * @param {string} jsonString The JSON message as a string.
- * @throws {ValidationError} if the JSON is invalid or does not follow the protocol.
- */
-function validateClient(jsonString) {
+export function validateClient(jsonString: string): void {
     const rootNode = _parseJson(jsonString);
-    const operacao = _getRequiredField(rootNode, 'operacao');
+    const operacaoString = _getRequiredField(rootNode, 'operacao');
     _validateStringLength(rootNode, 'operacao', 3, 200);
 
-    if (!Rules.getKeyFromValue(operacao)) {
-        throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacao}`);
+    let operacao: Rule;
+    try {
+        operacao = getEnum(operacaoString);
+    } catch (e) {
+        throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacaoString}`);
     }
 
     _checkExtraKeys(rootNode, operacao, EXPECTED_CLIENT_KEYS);
 
     switch (operacao) {
-        case Rules.CONECTAR:
-            break;
-        case Rules.USUARIO_LOGIN:
-            _validateUsuarioLoginClient(rootNode);
-            break;
-        case Rules.USUARIO_LOGOUT:
-            _validateUsuarioLogoutClient(rootNode);
-            break;
-        case Rules.USUARIO_CRIAR:
-            _validateUsuarioCriarClient(rootNode);
-            break;
-        case Rules.USUARIO_LER:
-            _validateUsuarioLerClient(rootNode);
-            break;
-        case Rules.USUARIO_ATUALIZAR:
-            _validateUsuarioAtualizarClient(rootNode);
-            break;
-        case Rules.USUARIO_DELETAR:
-            _validateUsuarioDeletarClient(rootNode);
-            break;
-        case Rules.TRANSACAO_CRIAR:
-            _validateTransacaoCriarClient(rootNode);
-            break;
-        case Rules.TRANSACAO_LER:
-            _validateTransacaoLerClient(rootNode);
-            break;
-        case Rules.DEPOSITAR:
-            _validateDepositarClient(rootNode);
-            break;
-        case Rules.ERRO_SERVIDOR:
-            _validateErroServidorClient(rootNode);
-            break;
-        default:
-            throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacao}`);
+        case Rules.CONECTAR: break;
+        case Rules.USUARIO_LOGIN: _validateUsuarioLoginClient(rootNode); break;
+        case Rules.USUARIO_LOGOUT: _validateUsuarioLogoutClient(rootNode); break;
+        case Rules.USUARIO_CRIAR: _validateUsuarioCriarClient(rootNode); break;
+        case Rules.USUARIO_LER: _validateUsuarioLerClient(rootNode); break;
+        case Rules.USUARIO_ATUALIZAR: _validateUsuarioAtualizarClient(rootNode); break;
+        case Rules.USUARIO_DELETAR: _validateUsuarioDeletarClient(rootNode); break;
+        case Rules.TRANSACAO_CRIAR: _validateTransacaoCriarClient(rootNode); break;
+        case Rules.TRANSACAO_LER: _validateTransacaoLerClient(rootNode); break;
+        case Rules.DEPOSITAR: _validateDepositarClient(rootNode); break;
+        case Rules.ERRO_SERVIDOR: _validateErroServidorClient(rootNode); break;
+        default: throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacao}`);
     }
 }
 
-/**
- * Validates a JSON message sent from the Server to the Client.
- * @param {string} jsonString The JSON message as a string.
- * @throws {ValidationError} if the JSON is invalid or does not follow the protocol.
- */
-function validateServer(jsonString) {
+export function validateServer(jsonString: string): void {
     const rootNode = _parseJson(jsonString);
-
-    const operacao = _getRequiredField(rootNode, 'operacao');
+    const operacaoString = _getRequiredField(rootNode, 'operacao');
     _validateStringLength(rootNode, 'operacao', 3, 200);
     
     const status = _getRequiredField(rootNode, 'status');
@@ -319,41 +236,29 @@ function validateServer(jsonString) {
 
     _validateStringLength(rootNode, 'info', 3, 200);
 
-    if (!Rules.getKeyFromValue(operacao)) {
-        throw new ValidationError(`Operação do servidor desconhecida ou não suportada: ${operacao}`);
+    let operacao: Rule;
+    try {
+        operacao = getEnum(operacaoString);
+    } catch (e) {
+        throw new ValidationError(`Operação do servidor desconhecida ou não suportada: ${operacaoString}`);
     }
 
-    let expectedKeysForThisResponse;
+    let expectedKeysForThisResponse: Set<string> | undefined;
     if (status === true) {
-        expectedKeysForThisResponse = EXPECTED_SERVER_KEYS[operacao];
+        expectedKeysForThisResponse = EXPECTED_SERVER_KEYS[operacao] ?? serverBaseKeys;
     } else {
         expectedKeysForThisResponse = serverBaseKeys;
     }
     
-    // We need to create a temporary map for _checkExtraKeys
     const tempExpectedMap = { [operacao]: expectedKeysForThisResponse };
     _checkExtraKeys(rootNode, operacao, tempExpectedMap);
 
     if (status === true) {
         switch (operacao) {
-            case Rules.USUARIO_LOGIN:
-                _validateUsuarioLoginServer(rootNode);
-                break;
-            case Rules.USUARIO_LER:
-                _validateUsuarioLerServer(rootNode);
-                break;
-            case Rules.TRANSACAO_LER:
-                _validateTransacaoLerServer(rootNode);
-                break;
-            default:
-                // No extra validation needed for other successful operations
-                break;
+            case Rules.USUARIO_LOGIN: _validateUsuarioLoginServer(rootNode); break;
+            case Rules.USUARIO_LER: _validateUsuarioLerServer(rootNode); break;
+            case Rules.TRANSACAO_LER: _validateTransacaoLerServer(rootNode); break;
+            default: break;
         }
     }
 }
-
-module.exports = {
-    validateClient,
-    validateServer,
-    ValidationError,
-};
