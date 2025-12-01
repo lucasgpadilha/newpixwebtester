@@ -21,7 +21,8 @@ const createTempDb = (testId) => {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         ra TEXT NOT NULL UNIQUE,
         password_hash TEXT NOT NULL,
-        token TEXT
+        token TEXT,
+        saldo REAL DEFAULT 0.0
       );
     `;
         const createTransactionTable = `

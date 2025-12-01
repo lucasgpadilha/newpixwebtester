@@ -6,13 +6,14 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./database.db"
 }
 
 model User {
   ra            String        @id @unique
   password_hash String
+  is_admin      Boolean       @default(false)
   TestHistory   TestHistory[]
 }
 
@@ -33,4 +34,30 @@ model TestStepResult {
   status     String // "OK" or "FAIL"
   details    String
   history    TestHistory @relation(fields: [history_id], references: [id])
+}
+
+model RAWhitelist {
+  id         Int      @id @default(autoincrement())
+  ra         String   @unique
+  created_at DateTime @default(now())
+  created_by String?  // Optional: RA of the admin who added it
+}
+
+model TestStep {
+  id                  Int      @id @default(autoincrement())
+  test_type           String   // 'CLIENT' or 'SERVER'
+  step_key            String   // Unique identifier like 'connect', 'register', 'pix_transfer'
+  step_name           String   // Human-readable name like '1. Conectar'
+  operation           String   // Protocol operation like 'conectar', 'usuario_criar'
+  step_order          Int      // Order of execution
+  weight              Float    @default(0) // Weight in final score
+  is_auto_evaluated   Boolean  @default(true) // If automatically evaluated
+  requires_user_input Boolean  @default(false) // If requires user input (self-assessment)
+  prompt_title        String?  // Title for user prompt
+  prompt_hint         String?  // Hint for user prompt
+  created_at          DateTime @default(now())
+  updated_at          DateTime @updatedAt
+
+  @@unique([test_type, step_key])
+  @@index([test_type, step_order])
 }

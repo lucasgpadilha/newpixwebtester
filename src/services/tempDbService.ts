@@ -23,7 +23,7 @@ const createTempDb = (testId: string): Promise<sqlite3.Database> => {
     `;
 
     const createTransactionTable = `
-      CREATE TABLE IF NOT EXISTS Transaction (
+      CREATE TABLE IF NOT EXISTS Transactions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER,
         type TEXT NOT NULL,

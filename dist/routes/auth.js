@@ -25,7 +25,11 @@ router.post('/register', async (req, res) => {
         if (typeof ra !== 'string' || typeof password !== 'string') {
             return res.status(400).json({ message: 'RA and password must be strings.' });
         }
-        if (!config_1.RA_WHITELIST.includes(ra)) {
+        // Check if RA is in whitelist (from database)
+        const isWhitelisted = await prisma.rAWhitelist.findUnique({
+            where: { ra },
+        });
+        if (!isWhitelisted) {
             return res.status(403).json({ message: 'RA not authorized for registration.' });
         }
         const existingUser = await prisma.user.findUnique({ where: { ra } });
@@ -65,9 +69,15 @@ router.post('/login', async (req, res) => {
         if (!isMatch) {
             return res.status(401).json({ message: 'Invalid credentials.' });
         }
+        // Get admin status
+        const userWithAdmin = await prisma.user.findUnique({
+            where: { ra: user.ra },
+            select: { ra: true, is_admin: true },
+        });
         const payload = {
             user: {
-                ra: user.ra,
+                ra: userWithAdmin?.ra || user.ra,
+                is_admin: userWithAdmin?.is_admin || false,
             },
         };
         const token = jsonwebtoken_1.default.sign(payload, config_1.JWT_SECRET, { expiresIn: '1h' });

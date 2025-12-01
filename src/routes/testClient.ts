@@ -12,6 +12,14 @@ interface AuthRequest extends Request {
   user?: { ra: string };
 }
 
+type ActiveClientServer = {
+  server: import('net').Server;
+  db: any;
+};
+
+const activeClientServers = new Map<string, ActiveClientServer>();
+const activeServersByUser = new Map<string, string>(); // Maps userRa -> testId
+
 router.post('/client/start', async (req: AuthRequest, res: Response) => {
   const userRa = req.user?.ra;
   if (!userRa) {
@@ -19,35 +27,125 @@ router.post('/client/start', async (req: AuthRequest, res: Response) => {
     return res.status(401).json({ message: 'User not authenticated.' });
   }
 
+  // Check if user already has an active server
+  if (activeServersByUser.has(userRa)) {
+    const existingTestId = activeServersByUser.get(userRa)!;
+    const existingServer = activeClientServers.get(existingTestId);
+    if (existingServer) {
+      const address = existingServer.server.address();
+      let port;
+      if (typeof address === 'object' && address !== null) {
+        port = address.port;
+      }
+      return res.status(400).json({
+        message: 'You already have an active mock server running. Please stop it first.',
+        existingPort: port,
+        existingTestId
+      });
+    } else {
+      // Clean up stale reference
+      activeServersByUser.delete(userRa);
+    }
+  }
+
   const testId = `test-${crypto.randomBytes(8).toString('hex')}`;
-  
+  let responded = false;
+  const safeRespond = (status: number, body: object) => {
+    if (!responded) {
+      responded = true;
+      res.status(status).json(body);
+    }
+  };
+
+  let db: any;
+  let tcpServer: any;
   try {
-    const db = await tempDbService.createTempDb(testId);
-    const tcpServer = startTcpMockServer(testId, db, userRa);
+    db = await tempDbService.createTempDb(testId);
+    tcpServer = startTcpMockServer(testId, db, userRa);
 
     tcpServer.listen(0, () => {
       const address = tcpServer.address();
       if (typeof address === 'string' || address === null) {
         // This case is unlikely for a TCP server starting on a dynamic port
         tcpServer.close();
-        res.status(500).json({ message: 'Failed to determine server port.' });
+        safeRespond(500, { message: 'Failed to determine server port.' });
         return;
       }
-      
+
       const port = address.port;
       console.log(`[${testId}] Mock TCP server started for RA ${userRa} on port ${port}`);
-      res.status(200).json({ port });
+      activeClientServers.set(testId, { server: tcpServer, db });
+      activeServersByUser.set(userRa, testId);
+      safeRespond(200, { port, testId });
     });
 
-    tcpServer.on('error', (err) => {
-        console.error(`[${testId}] Failed to start TCP Server:`, err);
-        res.status(500).json({ message: `Failed to start TCP server: ${err.message}`});
+    tcpServer.on('error', (err: Error) => {
+      console.error(`[${testId}] Failed to start TCP Server:`, err);
+      safeRespond(500, { message: `Failed to start TCP server: ${err.message}` });
     });
 
   } catch (error) {
     console.error(`[${testId}] Error during client test setup:`, error);
-    res.status(500).json({ message: 'Failed to set up client test environment.' });
+    safeRespond(500, { message: 'Failed to set up client test environment.' });
+    if (tcpServer) {
+      try {
+        tcpServer.close();
+      } catch { }
+    }
+    if (db) {
+      try {
+        await tempDbService.destroyTempDb(db, testId);
+      } catch { }
+    }
   }
+});
+
+router.get('/client/active', async (req: AuthRequest, res: Response) => {
+  const userRa = req.user?.ra;
+  if (!userRa) {
+    return res.status(401).json({ message: 'User not authenticated.' });
+  }
+
+  const testId = activeServersByUser.get(userRa);
+  if (!testId || !activeClientServers.has(testId)) {
+    return res.status(200).json({ active: false });
+  }
+
+  const server = activeClientServers.get(testId)!;
+  const address = server.server.address();
+  let port = null;
+  if (typeof address === 'object' && address !== null) {
+    port = address.port;
+  }
+
+  return res.status(200).json({
+    active: true,
+    testId,
+    port
+  });
+});
+
+router.post('/client/stop', async (req: AuthRequest, res: Response) => {
+  const userRa = req.user?.ra;
+  if (!userRa) {
+    return res.status(401).json({ message: 'User not authenticated.' });
+  }
+  const { testId } = req.body || {};
+  if (!testId || !activeClientServers.has(testId)) {
+    return res.status(404).json({ message: 'No active client test found.' });
+  }
+  const entry = activeClientServers.get(testId)!;
+  try {
+    entry.server.close();
+    await tempDbService.destroyTempDb(entry.db, testId);
+  } catch (e: any) {
+    console.error(`[${testId}] Error stopping client test:`, e);
+    return res.status(500).json({ message: 'Failed to stop client test.' });
+  } finally {
+    activeClientServers.delete(testId);
+    activeServersByUser.delete(userRa);
+  }
+  return res.status(200).json({ message: 'Client test stopped.' });
 });
 
 // Get test history for authenticated user
@@ -88,11 +186,16 @@ router.post('/self-assessment', async (req: AuthRequest, res: Response) => {
     return res.status(400).json({ message: 'test_history_id and assessments are required.' });
   }
 
+  const testHistoryId = parseInt(test_history_id, 10);
+  if (isNaN(testHistoryId)) {
+    return res.status(400).json({ message: 'test_history_id must be a valid number.' });
+  }
+
   try {
     // Get the test history
     const testHistory = await prisma.testHistory.findFirst({
       where: {
-        id: parseInt(test_history_id, 10),
+        id: testHistoryId,
         user_ra: userRa,
         test_type: 'CLIENT',
       },
@@ -124,7 +227,8 @@ router.post('/self-assessment', async (req: AuthRequest, res: Response) => {
       details: step.details || undefined,
     }));
 
-    const finalScore = scoringService.calculateScore(steps, 'CLIENT', selfAssessments);
+    const scoreMaps = await scoringService.getScoreMaps('CLIENT');
+    const finalScore = scoringService.calculateScore(steps, scoreMaps, selfAssessments);
 
     // Update test history with new score
     await prisma.testHistory.update({

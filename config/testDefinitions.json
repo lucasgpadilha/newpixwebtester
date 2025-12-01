@@ -1,0 +1,224 @@
+{
+  "SERVER": [
+    {
+      "key": "Protocol: Conectar",
+      "label": "Protocol: Conectar",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Handshake inicial entre cliente e servidor."
+    },
+    {
+      "key": "Protocol: Criar Usuário",
+      "label": "Protocol: Criar Usuário",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Criação de usuário com dados válidos."
+    },
+    {
+      "key": "Protocol: Login",
+      "label": "Protocol: Login",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Autenticação com RA e senha."
+    },
+    {
+      "key": "f) Servidor recebe depósito",
+      "label": "f) Servidor recebe depósito",
+      "type": "SERVER",
+      "weight": 0.3,
+      "enabled": true,
+      "description": "Depósito válido deve ser aceito."
+    },
+    {
+      "key": "g) Saldo correto apos deposito",
+      "label": "g) Saldo correto apos deposito",
+      "type": "SERVER",
+      "weight": 0.3,
+      "enabled": true,
+      "description": "Saldo deve refletir o dep��sito."
+    },
+    {
+      "key": "h) Servidor retorna extrato",
+      "label": "h) Servidor retorna extrato",
+      "type": "SERVER",
+      "weight": 0.3,
+      "enabled": true,
+      "description": "Extrato deve ser retornado com sucesso."
+    },
+    {
+      "key": "i) Extrato correto",
+      "label": "i) Extrato correto",
+      "type": "SERVER",
+      "weight": 0.3,
+      "enabled": true,
+      "description": "Extrato deve conter o depósito realizado."
+    },
+    {
+      "key": "j) Saque com saldo",
+      "label": "j) Saque com saldo",
+      "type": "SERVER",
+      "weight": 0.3,
+      "enabled": true,
+      "description": "Transferência com saldo suficiente."
+    },
+    {
+      "key": "Protocol: Atualizar Usuário",
+      "label": "Protocol: Atualizar Usuário",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Atualização de dados do usuário autenticado."
+    },
+    {
+      "key": "Nome atualizado refletido",
+      "label": "Nome atualizado refletido",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Consulta deve retornar o novo nome."
+    },
+    {
+      "key": "Protocol: Logout",
+      "label": "Protocol: Logout",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Encerramento de sessão com sucesso."
+    },
+    {
+      "key": "Logout invalida token",
+      "label": "Logout invalida token",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Token não deve autorizar após logout."
+    },
+    {
+      "key": "Protocol: Deletar Usuário (sem auth)",
+      "label": "Protocol: Deletar Usuário (sem auth)",
+      "type": "SERVER",
+      "weight": 0,
+      "enabled": true,
+      "description": "Servidor deve bloquear deleção sem autenticação válida."
+    },
+    {
+      "key": "k) Erro Cadastro (CPF inválido)",
+      "label": "k) Erro Cadastro (CPF inválido)",
+      "type": "SERVER",
+      "weight": 0.2,
+      "enabled": true,
+      "description": "CPF inválido deve ser rejeitado."
+    },
+    {
+      "key": "l) Erro Saque (saldo insuficiente)",
+      "label": "l) Erro Saque (saldo insuficiente)",
+      "type": "SERVER",
+      "weight": 0.2,
+      "enabled": true,
+      "description": "Transferência acima do saldo deve falhar."
+    },
+    {
+      "key": "m) Erro: Chaves faltando",
+      "label": "m) Erro: Chaves faltando",
+      "type": "SERVER",
+      "weight": 0.1,
+      "enabled": true,
+      "description": "Servidor precisa validar presença de campos obrigatórios."
+    },
+    {
+      "key": "n) Erro: Data inválida",
+      "label": "n) Erro: Data inválida",
+      "type": "SERVER",
+      "weight": 0.1,
+      "enabled": true,
+      "description": "Formato de data inválido deve ser rejeitado."
+    },
+    {
+      "key": "o) Erro: JSON inválido",
+      "label": "o) Erro: JSON inválido",
+      "type": "SERVER",
+      "weight": 0.1,
+      "enabled": true,
+      "description": "Servidor deve detectar JSON mal formatado."
+    }
+  ],
+  "CLIENT": [
+    {
+      "key": "connect",
+      "label": "Client conecta",
+      "type": "CLIENT",
+      "weight": 0.1,
+      "enabled": true,
+      "description": "Cliente estabelece conexão com mock server."
+    },
+    {
+      "key": "register",
+      "label": "Client registra usuário",
+      "type": "CLIENT",
+      "weight": 0.1,
+      "enabled": true
+    },
+    {
+      "key": "login",
+      "label": "Client faz login",
+      "type": "CLIENT",
+      "weight": 0.1,
+      "enabled": true
+    },
+    {
+      "key": "deposit",
+      "label": "Client envia depósito",
+      "type": "CLIENT",
+      "weight": 0.2,
+      "enabled": true
+    },
+    {
+      "key": "read_statement",
+      "label": "Client lê extrato",
+      "type": "CLIENT",
+      "weight": 0.2,
+      "enabled": true
+    },
+    {
+      "key": "error_login_test",
+      "label": "Erro de login exibido",
+      "type": "CLIENT",
+      "weight": 0.15,
+      "enabled": true
+    },
+    {
+      "key": "error_register_test",
+      "label": "Erro de cadastro exibido",
+      "type": "CLIENT",
+      "weight": 0.15,
+      "enabled": true
+    },
+    {
+      "key": "c) Extrato exibido corretamente",
+      "label": "Self: Extrato exibido",
+      "type": "CLIENT",
+      "weight": 0.2,
+      "enabled": true,
+      "scope": "SELF"
+    },
+    {
+      "key": "d) Erro de cadastro exibido",
+      "label": "Self: Erro cadastro exibido",
+      "type": "CLIENT",
+      "weight": 0.15,
+      "enabled": true,
+      "scope": "SELF"
+    },
+    {
+      "key": "e) Erro de login exibido",
+      "label": "Self: Erro login exibido",
+      "type": "CLIENT",
+      "weight": 0.15,
+      "enabled": true,
+      "scope": "SELF"
+    }
+  ]
+}

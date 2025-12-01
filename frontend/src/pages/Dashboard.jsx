@@ -1,20 +1,42 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import './Dashboard.css';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3000';
 
 function Dashboard() {
+  const [activeTab, setActiveTab] = useState('client'); // 'client' or 'server'
+
+  // Client test state
+  const [clientPort, setClientPort] = useState(null);
+  const [currentTestId, setCurrentTestId] = useState(null);
+  const [clientLogs, setClientLogs] = useState([]);
+  const [clientChecklist, setClientChecklist] = useState([
+    { id: 'connect', label: '1. Conectar', status: 'pending', operation: 'conectar' },
+    { id: 'register', label: '2. Criar usuário', status: 'pending', operation: 'usuario_criar' },
+    { id: 'login', label: '3. Fazer login', status: 'pending', operation: 'usuario_login' },
+    { id: 'deposit', label: '4. Depositar', status: 'pending', operation: 'depositar' },
+    { id: 'read_statement', label: '5. Ler extrato', status: 'pending', operation: 'transacao_ler' },
+    { id: 'error_login_test', label: '6. Teste erro login', status: 'pending', operation: 'usuario_login (erro)' },
+    { id: 'error_register_test', label: '7. Teste erro cadastro', status: 'pending', operation: 'usuario_criar (erro)' }
+  ]);
+  const [currentPrompt, setCurrentPrompt] = useState(null);
+  const [currentWarning, setCurrentWarning] = useState(null);
+  const [selfAssessments, setSelfAssessments] = useState({});
+  const [testStep, setTestStep] = useState('');
+
+  // Server test state
   const [serverIp, setServerIp] = useState('');
   const [serverPort, setServerPort] = useState('');
-  const [clientPort, setClientPort] = useState(null);
-  const [logs, setLogs] = useState([]);
+  const [serverLogs, setServerLogs] = useState([]);
+  const [serverRunning, setServerRunning] = useState(false);
+
+  // Common state
+  const [isAdmin, setIsAdmin] = useState(false);
   const [testHistory, setTestHistory] = useState([]);
-  const [currentTestType, setCurrentTestType] = useState(null);
-  const [currentTestId, setCurrentTestId] = useState(null);
-  const [testStep, setTestStep] = useState('');
-  const [selfAssessments, setSelfAssessments] = useState({});
+  const [wsStatus, setWsStatus] = useState('disconnected');
   const wsRef = useRef(null);
   const navigate = useNavigate();
 
@@ -25,50 +47,84 @@ function Dashboard() {
       return;
     }
 
-    // Connect WebSocket
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]));
+      setIsAdmin(payload.user?.is_admin || false);
+    } catch {
+      setIsAdmin(false);
+    }
+
+    setWsStatus('connecting');
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
-      addLog('WebSocket connected. Authenticating...');
+      setWsStatus('connected');
+      addClientLog('WebSocket conectado');
       ws.send(JSON.stringify({ type: 'auth', token }));
     };
 
     ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
-      
+
       if (data.type === 'auth_success') {
-        addLog('WebSocket authenticated successfully.');
-      } else if (data.event === 'test_step') {
-        addLog(`[${data.step}] ${data.status}: ${data.details || ''}`);
+        return;
+      }
+
+      if (data.event === 'test_step') {
+        addClientLog(`[${data.step}] ${data.status}: ${data.details || ''}`);
         setTestStep(data.step);
-      } else if (data.event === 'test_finished') {
-        addLog('Test finished!');
+        updateChecklist(data.step, data.status);
+        return;
+      }
+
+      if (data.event === 'test_finished') {
+        addClientLog('✅ Teste finalizado!');
         if (data.final_score !== undefined) {
-          addLog(`Final Score: ${data.final_score}`);
+          addClientLog(`Nota: ${data.final_score}`);
         }
         if (data.test_history_id) {
           setCurrentTestId(data.test_history_id);
         }
-        setCurrentTestType(null);
         fetchTestHistory();
-      } else if (data.event === 'info') {
-        addLog(`Info: ${data.message}`);
-      } else if (data.event === 'error') {
-        addLog(`Error: ${data.message}`);
+        return;
+      }
+
+      if (data.event === 'warning') {
+        setCurrentWarning(data.message);
+        addClientLog(`⚠️ ${data.message}`);
+        setTimeout(() => setCurrentWarning(null), 10000);
+        return;
+      }
+
+      if (data.event === 'prompt') {
+        setCurrentPrompt({ title: data.title, hint: data.hint });
+        addClientLog(`📋 ${data.title}`);
+        return;
+      }
+
+      if (data.event === 'info') {
+        addClientLog(`ℹ️ ${data.message}`);
+        return;
+      }
+
+      if (data.event === 'error') {
+        addClientLog(`❌ ${data.message}`);
       }
     };
 
-    ws.onerror = (error) => {
-      addLog('WebSocket error occurred.');
-      console.error('WebSocket error:', error);
+    ws.onerror = () => {
+      setWsStatus('error');
+      addClientLog('Erro no WebSocket');
     };
 
     ws.onclose = () => {
-      addLog('WebSocket disconnected.');
+      setWsStatus('disconnected');
+      addClientLog('WebSocket desconectado');
     };
 
     fetchTestHistory();
+    fetchActiveServer();
 
     return () => {
       if (wsRef.current) {
@@ -77,13 +133,31 @@ function Dashboard() {
     };
   }, [navigate]);
 
-  const addLog = (message: string) => {
-    setLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+  const addClientLog = (message) => {
+    setClientLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+  };
+
+  const addServerLog = (message) => {
+    setServerLogs((prev) => [...prev, `[${new Date().toLocaleTimeString()}] ${message}`]);
+  };
+
+  const updateChecklist = (step, status) => {
+    setClientChecklist((prev) =>
+      prev.map((item) =>
+        item.id === step ? { ...item, status: status === 'OK' ? 'completed' : 'failed' } : item
+      )
+    );
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
   };
 
   const fetchTestHistory = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
-      const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/api/test/history`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -93,37 +167,33 @@ function Dashboard() {
     }
   };
 
-  const handleServerTest = async () => {
-    if (!serverIp || !serverPort) {
-      alert('Please enter IP and Port');
-      return;
-    }
-
-    setLogs([]);
-    setCurrentTestType('SERVER');
-    addLog('Starting server test...');
-
+  const fetchActiveServer = async () => {
+    const token = localStorage.getItem('token');
+    if (!token) return;
     try {
-      const token = localStorage.getItem('token');
-      await axios.post(
-        `${API_URL}/api/test/server`,
-        { ip: serverIp, port: parseInt(serverPort, 10) },
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      addLog('Server test started. Waiting for results...');
+      const response = await axios.get(`${API_URL}/api/test/client/active`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (response.data.active) {
+        setClientPort(response.data.port);
+        setCurrentTestId(response.data.testId);
+        addClientLog(`Servidor ativo encontrado na porta ${response.data.port}`);
+      }
     } catch (error) {
-      addLog(`Error: ${error.response?.data?.message || 'Failed to start server test'}`);
-      setCurrentTestType(null);
+      console.error('Error fetching active server:', error);
     }
   };
 
-  const handleClientTest = async () => {
-    setLogs([]);
-    setCurrentTestType('CLIENT');
+  const handleStartClientTest = async () => {
+    setClientLogs([]);
+    setClientChecklist(prev => prev.map(item => ({ ...item, status: 'pending' })));
     setClientPort(null);
     setTestStep('');
     setSelfAssessments({});
-    addLog('Starting client test...');
+    setCurrentPrompt(null);
+    setCurrentWarning(null);
+    setCurrentTestId(null);
+    addClientLog('Iniciando teste de cliente...');
 
     try {
       const token = localStorage.getItem('token');
@@ -133,21 +203,74 @@ function Dashboard() {
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setClientPort(response.data.port);
-      addLog(`Mock server started on port ${response.data.port}`);
-      addLog('Please connect your client to this port.');
+      setCurrentTestId(response.data.testId);
+      addClientLog(`Servidor mock iniciado na porta ${response.data.port}`);
+      addClientLog('Conecte seu cliente TCP a esta porta');
     } catch (error) {
-      addLog(`Error: ${error.response?.data?.message || 'Failed to start client test'}`);
-      setCurrentTestType(null);
+      if (error.response?.status === 400) {
+        addClientLog(`❌ ${error.response.data.message}`);
+        if (error.response.data.existingPort) {
+          addClientLog(`Servidor ativo na porta: ${error.response.data.existingPort}`);
+        }
+      } else {
+        addClientLog(`❌ Erro: ${error.response?.data?.message || 'Falha ao iniciar teste'}`);
+      }
     }
   };
 
-  const handleSelfAssessment = async (item: string, value: boolean) => {
+  const handleStopClientTest = async () => {
+    if (!currentTestId) {
+      addClientLog('Nenhum teste ativo para parar');
+      return;
+    }
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/api/test/client/stop`,
+        { testId: currentTestId },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      addClientLog('✅ Teste parado com sucesso');
+      setClientPort(null);
+      setCurrentTestId(null);
+      setCurrentPrompt(null);
+    } catch (error) {
+      addClientLog(`❌ Erro ao parar teste: ${error.response?.data?.message || 'Erro desconhecido'}`);
+    }
+  };
+
+  const handleServerTest = async () => {
+    if (!serverIp || !serverPort) {
+      alert('Informe IP e Porta do servidor');
+      return;
+    }
+
+    setServerLogs([]);
+    setServerRunning(true);
+    addServerLog('Iniciando teste de servidor...');
+
+    try {
+      const token = localStorage.getItem('token');
+      await axios.post(
+        `${API_URL}/api/test/server`,
+        { ip: serverIp, port: parseInt(serverPort, 10) },
+        { headers: { Authorization: `Bearer ${token}` } }
+      );
+      addServerLog('Teste de servidor iniciado. Aguarde os resultados...');
+    } catch (error) {
+      addServerLog(`❌ Erro: ${error.response?.data?.message || 'Falha ao iniciar teste'}`);
+      setServerRunning(false);
+    }
+  };
+
+  const handleSelfAssessment = (item, value) => {
     setSelfAssessments((prev) => ({ ...prev, [item]: value }));
   };
 
   const submitSelfAssessments = async () => {
     if (!currentTestId) {
-      alert('No test ID available');
+      alert('Nenhum ID de teste disponível');
       return;
     }
 
@@ -156,217 +279,273 @@ function Dashboard() {
       const response = await axios.post(
         `${API_URL}/api/test/self-assessment`,
         {
-          test_history_id: currentTestId,
-          assessments: selfAssessments,
+          test_history_id: parseInt(currentTestId, 10),
+          assessments: selfAssessments
         },
         { headers: { Authorization: `Bearer ${token}` } }
       );
-      addLog(`Self-assessments submitted. Final Score: ${response.data.final_score}`);
+      addClientLog(`✅ Autoavaliação enviada. Nota final: ${response.data.final_score}`);
       fetchTestHistory();
     } catch (error) {
-      addLog(`Error: ${error.response?.data?.message || 'Failed to submit self-assessments'}`);
+      addClientLog(`❌ Erro ao enviar autoavaliação: ${error.response?.data?.message || 'Erro'}`);
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('token');
-    navigate('/login');
+  const getChecklistIcon = (status) => {
+    if (status === 'completed') return '✅';
+    if (status === 'failed') return '❌';
+    return '⏳';
   };
 
   return (
-    <div style={{ padding: '20px', maxWidth: '1200px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-        <h1>NewPix Web Tester - Dashboard</h1>
-        <button onClick={handleLogout} style={{ padding: '10px 20px', cursor: 'pointer' }}>
-          Logout
+    <div className="dashboard-wrapper">
+      <div className="page-hero">
+        <div>
+          <p className="hero-kicker">Painel de Testes</p>
+          <h1>NewPix Web Tester</h1>
+          <div className="hero-meta">
+            <span className={`status-pill ${wsStatus === 'connected' ? 'success' : 'danger'}`}>
+              WS: {wsStatus}
+            </span>
+          </div>
+        </div>
+        <div className="dashboard-header-actions">
+          {isAdmin && (
+            <button className="ghost-button" onClick={() => navigate('/admin')}>
+              Admin Panel
+            </button>
+          )}
+          <button className="ghost-button" onClick={handleLogout}>
+            Logout
+          </button>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="tabs">
+        <button
+          className={`tab ${activeTab === 'client' ? 'active' : ''}`}
+          onClick={() => setActiveTab('client')}
+        >
+          🧪 Teste de Cliente
+        </button>
+        <button
+          className={`tab ${activeTab === 'server' ? 'active' : ''}`}
+          onClick={() => setActiveTab('server')}
+        >
+          🖥️ Teste de Servidor
         </button>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', marginBottom: '20px' }}>
-        {/* Test My Server */}
-        <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '5px' }}>
-          <h2>Test My Server</h2>
-          <div style={{ marginBottom: '10px' }}>
-            <input
-              type="text"
-              placeholder="Server IP"
-              value={serverIp}
-              onChange={(e) => setServerIp(e.target.value)}
-              style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
-              disabled={currentTestType === 'SERVER'}
-            />
-            <input
-              type="number"
-              placeholder="Server Port"
-              value={serverPort}
-              onChange={(e) => setServerPort(e.target.value)}
-              style={{ width: '100%', padding: '8px', marginBottom: '10px' }}
-              disabled={currentTestType === 'SERVER'}
-            />
-            <button
-              onClick={handleServerTest}
-              disabled={currentTestType === 'SERVER'}
-              style={{
-                width: '100%',
-                padding: '10px',
-                backgroundColor: currentTestType === 'SERVER' ? '#ccc' : '#007bff',
-                color: 'white',
-                border: 'none',
-                cursor: currentTestType === 'SERVER' ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {currentTestType === 'SERVER' ? 'Test Running...' : 'Start Server Test'}
-            </button>
-          </div>
-        </div>
+      {/* Client Test Tab */}
+      {activeTab === 'client' && (
+        <div className="tab-content">
+          <section className="card">
+            <div className="card-header">
+              <h2>Teste do seu Cliente TCP</h2>
+              <div>
+                {!clientPort ? (
+                  <button className="primary-button" onClick={handleStartClientTest}>
+                    Iniciar Teste
+                  </button>
+                ) : (
+                  <button className="danger-button" onClick={handleStopClientTest}>
+                    Parar Teste
+                  </button>
+                )}
+              </div>
+            </div>
 
-        {/* Test My Client */}
-        <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '5px' }}>
-          <h2>Test My Client</h2>
-          {clientPort ? (
-            <div>
-              <p><strong>Connect your client to port: {clientPort}</strong></p>
-              {testStep === 'read_statement' && (
-                <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
-                  <p><strong>Passo 6: Seu cliente exibiu o extrato corretamente?</strong></p>
-                  <button
-                    onClick={() => handleSelfAssessment('c) Extrato exibido corretamente', true)}
-                    style={{ marginRight: '10px', padding: '5px 15px' }}
-                  >
-                    Sim
-                  </button>
-                  <button
-                    onClick={() => handleSelfAssessment('c) Extrato exibido corretamente', false)}
-                    style={{ padding: '5px 15px' }}
-                  >
-                    Não
-                  </button>
+            {clientPort && (
+              <div className="active-server-banner">
+                <div className="server-info">
+                  <span className="server-status">🟢 Servidor Ativo</span>
+                  <span className="server-port">Porta: <strong>{clientPort}</strong></span>
+                  <span className="server-id">ID: {currentTestId}</span>
                 </div>
-              )}
-              {testStep === 'error_register_test' && (
-                <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
-                  <p><strong>Passo 8: Seu cliente exibiu a mensagem de erro de cadastro?</strong></p>
-                  <button
-                    onClick={() => handleSelfAssessment('d) Erro de cadastro exibido', true)}
-                    style={{ marginRight: '10px', padding: '5px 15px' }}
-                  >
-                    Sim
-                  </button>
-                  <button
-                    onClick={() => handleSelfAssessment('d) Erro de cadastro exibido', false)}
-                    style={{ padding: '5px 15px' }}
-                  >
-                    Não
-                  </button>
+                <button className="danger-button-small" onClick={handleStopClientTest}>
+                  🛑 Parar Servidor
+                </button>
+              </div>
+            )}
+
+            {!clientPort && (
+              <div className="info-banner">
+                <p>💡 Clique em "Iniciar Teste" para criar um servidor mock TCP e testar seu cliente.</p>
+              </div>
+            )}
+
+            {clientPort && (
+              <>
+                {currentWarning && (
+                  <div className="warning-banner">
+                    <div>
+                      <strong>⚠️ Aviso</strong>
+                      <p>{currentWarning}</p>
+                    </div>
+                    <button onClick={() => setCurrentWarning(null)}>Dispensar</button>
+                  </div>
+                )}
+
+                {currentPrompt && (
+                  <div className="prompt-banner">
+                    <h3>📋 {currentPrompt.title}</h3>
+                    <p>💡 {currentPrompt.hint}</p>
+                  </div>
+                )}
+
+                <div className="checklist-section">
+                  <h3>Checklist de Testes</h3>
+                  <div className="checklist">
+                    {clientChecklist.map((item) => (
+                      <div key={item.id} className={`checklist-item ${item.status}`}>
+                        <span className="check-icon">{getChecklistIcon(item.status)}</span>
+                        <div className="check-content">
+                          <strong>{item.label}</strong>
+                          <code>{item.operation}</code>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              )}
-              {testStep === 'error_login_test' && (
-                <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#f0f0f0', borderRadius: '5px' }}>
-                  <p><strong>Passo 7: Seu cliente exibiu a mensagem de erro de login?</strong></p>
-                  <button
-                    onClick={() => handleSelfAssessment('e) Erro de login exibido', true)}
-                    style={{ marginRight: '10px', padding: '5px 15px' }}
-                  >
-                    Sim
+
+                {testStep === 'read_statement' && (
+                  <div className="assessment-block">
+                    <p>Seu cliente exibiu o extrato corretamente?</p>
+                    <div className="button-row">
+                      <button onClick={() => handleSelfAssessment('c) Extrato exibido corretamente', true)}>Sim</button>
+                      <button onClick={() => handleSelfAssessment('c) Extrato exibido corretamente', false)}>Não</button>
+                    </div>
+                  </div>
+                )}
+
+                {testStep === 'error_login_test' && (
+                  <div className="assessment-block">
+                    <p>Seu cliente exibiu a mensagem de erro de login?</p>
+                    <div className="button-row">
+                      <button onClick={() => handleSelfAssessment('e) Erro de login exibido', true)}>Sim</button>
+                      <button onClick={() => handleSelfAssessment('e) Erro de login exibido', false)}>Não</button>
+                    </div>
+                  </div>
+                )}
+
+                {testStep === 'error_register_test' && (
+                  <div className="assessment-block">
+                    <p>Seu cliente exibiu a mensagem de erro de cadastro?</p>
+                    <div className="button-row">
+                      <button onClick={() => handleSelfAssessment('d) Erro de cadastro exibido', true)}>Sim</button>
+                      <button onClick={() => handleSelfAssessment('d) Erro de cadastro exibido', false)}>Não</button>
+                    </div>
+                  </div>
+                )}
+
+                {currentTestId && Object.keys(selfAssessments).length > 0 && (
+                  <button className="primary-button" onClick={submitSelfAssessments}>
+                    Enviar Autoavaliação
                   </button>
-                  <button
-                    onClick={() => handleSelfAssessment('e) Erro de login exibido', false)}
-                    style={{ padding: '5px 15px' }}
-                  >
-                    Não
-                  </button>
-                </div>
-              )}
-              {currentTestId && Object.keys(selfAssessments).length > 0 && (
-                <div style={{ marginTop: '20px' }}>
-                  <button
-                    onClick={submitSelfAssessments}
-                    style={{
-                      padding: '10px 20px',
-                      backgroundColor: '#28a745',
-                      color: 'white',
-                      border: 'none',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Submit Self-Assessments
-                  </button>
-                </div>
+                )}
+              </>
+            )}
+          </section>
+
+          <section className="card">
+            <div className="card-header">
+              <h2>Logs do Teste de Cliente</h2>
+              <button className="ghost-button" onClick={() => setClientLogs([])}>Limpar</button>
+            </div>
+            <div className="log-viewer">
+              {clientLogs.length === 0 ? (
+                <div className="empty-state">Logs aparecerão aqui...</div>
+              ) : (
+                clientLogs.map((log, index) => <div key={index}>{log}</div>)
               )}
             </div>
-          ) : (
-            <button
-              onClick={handleClientTest}
-              disabled={currentTestType === 'CLIENT'}
-              style={{
-                width: '100%',
-                padding: '10px',
-                backgroundColor: currentTestType === 'CLIENT' ? '#ccc' : '#28a745',
-                color: 'white',
-                border: 'none',
-                cursor: currentTestType === 'CLIENT' ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {currentTestType === 'CLIENT' ? 'Test Running...' : 'Start Client Test'}
-            </button>
-          )}
+          </section>
         </div>
-      </div>
+      )
+      }
 
-      {/* Test Logs */}
-      <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '5px', marginBottom: '20px' }}>
-        <h2>Test Logs</h2>
-        <div
-          style={{
-            height: '300px',
-            overflowY: 'auto',
-            backgroundColor: '#f5f5f5',
-            padding: '10px',
-            fontFamily: 'monospace',
-            fontSize: '12px',
-          }}
-        >
-          {logs.length === 0 ? (
-            <div>Logs will appear here...</div>
-          ) : (
-            logs.map((log, index) => <div key={index}>{log}</div>)
-          )}
-        </div>
-      </div>
+      {/* Server Test Tab */}
+      {
+        activeTab === 'server' && (
+          <div className="tab-content">
+            <section className="card">
+              <div className="card-header">
+                <h2>Teste do seu Servidor TCP</h2>
+              </div>
+              <div className="form-grid">
+                <input
+                  type="text"
+                  placeholder="Server IP"
+                  value={serverIp}
+                  onChange={(e) => setServerIp(e.target.value)}
+                  disabled={serverRunning}
+                />
+                <input
+                  type="number"
+                  placeholder="Server Port"
+                  value={serverPort}
+                  onChange={(e) => setServerPort(e.target.value)}
+                  disabled={serverRunning}
+                />
+                <button
+                  className="primary-button"
+                  onClick={handleServerTest}
+                  disabled={serverRunning}
+                >
+                  {serverRunning ? 'Executando...' : 'Iniciar Teste'}
+                </button>
+              </div>
+            </section>
+
+            <section className="card">
+              <div className="card-header">
+                <h2>Logs do Teste de Servidor</h2>
+                <button className="ghost-button" onClick={() => setServerLogs([])}>Limpar</button>
+              </div>
+              <div className="log-viewer">
+                {serverLogs.length === 0 ? (
+                  <div className="empty-state">Logs aparecerão aqui...</div>
+                ) : (
+                  serverLogs.map((log, index) => <div key={index}>{log}</div>)
+                )}
+              </div>
+            </section>
+          </div>
+        )
+      }
 
       {/* Test History */}
-      <div style={{ border: '1px solid #ccc', padding: '20px', borderRadius: '5px' }}>
-        <h2>Test History</h2>
+      <section className="card">
+        <div className="card-header">
+          <h2>Histórico de Testes</h2>
+        </div>
         {testHistory.length === 0 ? (
-          <p>No test history available.</p>
+          <div className="empty-state">Nenhum teste realizado ainda.</div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <table className="data-table">
             <thead>
-              <tr style={{ backgroundColor: '#f0f0f0' }}>
-                <th style={{ padding: '10px', border: '1px solid #ccc' }}>Date</th>
-                <th style={{ padding: '10px', border: '1px solid #ccc' }}>Type</th>
-                <th style={{ padding: '10px', border: '1px solid #ccc' }}>Score</th>
-                <th style={{ padding: '10px', border: '1px solid #ccc' }}>Steps</th>
+              <tr>
+                <th>Data</th>
+                <th>Tipo</th>
+                <th>Nota</th>
+                <th>Etapas</th>
               </tr>
             </thead>
             <tbody>
               {testHistory.map((test) => (
                 <tr key={test.id}>
-                  <td style={{ padding: '10px', border: '1px solid #ccc' }}>
-                    {new Date(test.created_at).toLocaleString()}
-                  </td>
-                  <td style={{ padding: '10px', border: '1px solid #ccc' }}>{test.test_type}</td>
-                  <td style={{ padding: '10px', border: '1px solid #ccc' }}>{test.final_score}</td>
-                  <td style={{ padding: '10px', border: '1px solid #ccc' }}>
-                    {test.TestStepResult?.length || 0} steps
-                  </td>
+                  <td>{new Date(test.created_at).toLocaleString()}</td>
+                  <td>{test.test_type}</td>
+                  <td>{test.final_score}</td>
+                  <td>{test.TestStepResult?.length || 0}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         )}
-      </div>
-    </div>
+      </section>
+    </div >
   );
 }
 

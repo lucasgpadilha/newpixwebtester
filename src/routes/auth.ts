@@ -2,7 +2,7 @@ import express, { Request, Response } from 'express';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
-import { RA_WHITELIST, JWT_SECRET } from '../config';
+import { JWT_SECRET } from '../config';
 
 const router = express.Router();
 const prisma = new PrismaClient();
@@ -25,7 +25,12 @@ router.post('/register', async (req: Request, res: Response) => {
         return res.status(400).json({ message: 'RA and password must be strings.' });
     }
 
-    if (!RA_WHITELIST.includes(ra)) {
+    // Check if RA is in whitelist (from database)
+    const isWhitelisted = await prisma.rAWhitelist.findUnique({
+      where: { ra },
+    });
+
+    if (!isWhitelisted) {
       return res.status(403).json({ message: 'RA not authorized for registration.' });
     }
 
@@ -74,9 +79,16 @@ router.post('/login', async (req: Request, res: Response) => {
       return res.status(401).json({ message: 'Invalid credentials.' });
     }
 
+    // Get admin status
+    const userWithAdmin = await prisma.user.findUnique({
+      where: { ra: user.ra },
+      select: { ra: true, is_admin: true },
+    });
+
     const payload = {
       user: {
-        ra: user.ra,
+        ra: userWithAdmin?.ra || user.ra,
+        is_admin: userWithAdmin?.is_admin || false,
       },
     };
 

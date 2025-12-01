@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import { JWT_SECRET } from '../config';
 
 interface AuthRequest extends Request {
   user?: { ra: string };
@@ -13,16 +14,9 @@ const authMiddleware = (req: AuthRequest, res: Response, next: NextFunction) => 
   }
 
   const token = authHeader.split(' ')[1];
-  const secret = process.env.JWT_SECRET;
-
-  if (!secret) {
-    // This should not happen in a configured environment
-    console.error("JWT_SECRET is not defined.");
-    return res.status(500).json({ message: 'Server configuration error' });
-  }
 
   try {
-    const payload = jwt.verify(token, secret) as { user: { ra: string } };
+    const payload = jwt.verify(token, JWT_SECRET) as { user: { ra: string; is_admin?: boolean } };
     req.user = payload.user;
     next();
   } catch (error) {

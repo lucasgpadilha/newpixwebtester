@@ -1,12 +1,42 @@
 "use strict";
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ValidationError = void 0;
 exports.validateClient = validateClient;
 exports.validateServer = validateServer;
-const rules_1 = __importDefault(require("./rules"));
+const rules_1 = __importStar(require("./rules"));
 class ValidationError extends Error {
     constructor(message) {
         super(message);
@@ -184,10 +214,14 @@ function _validateTransacaoLerServer(node) {
 // --- PUBLIC API ---
 function validateClient(jsonString) {
     const rootNode = _parseJson(jsonString);
-    const operacao = _getRequiredField(rootNode, 'operacao');
+    const operacaoString = _getRequiredField(rootNode, 'operacao');
     _validateStringLength(rootNode, 'operacao', 3, 200);
-    if (!validRuleValues.has(operacao)) {
-        throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacao}`);
+    let operacao;
+    try {
+        operacao = (0, rules_1.getEnum)(operacaoString);
+    }
+    catch (e) {
+        throw new ValidationError(`Operação do cliente desconhecida ou não suportada: ${operacaoString}`);
     }
     _checkExtraKeys(rootNode, operacao, EXPECTED_CLIENT_KEYS);
     switch (operacao) {
@@ -227,15 +261,19 @@ function validateClient(jsonString) {
 }
 function validateServer(jsonString) {
     const rootNode = _parseJson(jsonString);
-    const operacao = _getRequiredField(rootNode, 'operacao');
+    const operacaoString = _getRequiredField(rootNode, 'operacao');
     _validateStringLength(rootNode, 'operacao', 3, 200);
     const status = _getRequiredField(rootNode, 'status');
     if (typeof status !== 'boolean') {
         throw new ValidationError("O campo 'status' na resposta do servidor deve ser um booleano (true/false).");
     }
     _validateStringLength(rootNode, 'info', 3, 200);
-    if (!validRuleValues.has(operacao)) {
-        throw new ValidationError(`Operação do servidor desconhecida ou não suportada: ${operacao}`);
+    let operacao;
+    try {
+        operacao = (0, rules_1.getEnum)(operacaoString);
+    }
+    catch (e) {
+        throw new ValidationError(`Operação do servidor desconhecida ou não suportada: ${operacaoString}`);
     }
     let expectedKeysForThisResponse;
     if (status === true) {
